@@ -121,6 +121,8 @@ DatadogFlagsConfiguration(
   trackExposures: true,
   trackEvaluations: true,
   evaluationFlushInterval: const Duration(seconds: 10),
+  assignmentRequestTimeout: const Duration(seconds: 1),
+  assignmentRequestRetryCount: 1,
   store: myStore,
 );
 ```
@@ -129,6 +131,8 @@ DatadogFlagsConfiguration(
 - `trackEvaluations` enables aggregated flag evaluation events.
 - `evaluationFlushInterval` controls periodic flag evaluation uploads and is
   bounded to 1-60 seconds.
+- `assignmentRequestTimeout` sets the timeout for each assignment request.
+- `assignmentRequestRetryCount` sets the retry count after the first attempt.
 - `store` is optional last-known assignment storage.
 - `httpClient` and custom endpoints are available for tests and advanced
   embedding.

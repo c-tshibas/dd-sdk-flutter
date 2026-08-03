@@ -3,6 +3,7 @@
 // developed at Datadog (https://www.datadoghq.com/).
 // Copyright 2019-Present Datadog, Inc.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -31,24 +32,13 @@ class FlagAssignmentsFetcher {
   ) async {
     final endpoint = configuration.customFlagsEndpoint ??
         datadogConfig.flagsEndpoint().replace(path: '/precompute-assignments');
-    final http.Response response;
-    try {
-      response = await httpClient.post(
-        endpoint,
-        headers: _headers(),
-        body: jsonEncode(
-          PrecomputeRequest.fromContext(
-            datadogConfig: datadogConfig,
-            evaluationContext: evaluationContext,
-          ).toJson(),
-        ),
-      );
-    } catch (error) {
-      throw FlagsException.networkError(
-        'Failed to fetch flag assignments.',
-        cause: error,
-      );
-    }
+    final body = jsonEncode(
+      PrecomputeRequest.fromContext(
+        datadogConfig: datadogConfig,
+        evaluationContext: evaluationContext,
+      ).toJson(),
+    );
+    final response = await _fetchResponse(endpoint, body);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw FlagsException.networkError(
@@ -83,6 +73,43 @@ class FlagAssignmentsFetcher {
       ...?configuration.customFlagsHeaders,
     };
   }
+
+  Future<http.Response> _fetchResponse(Uri endpoint, String body) async {
+    final configuredTimeout = configuration.assignmentRequestTimeout;
+    final timeout = configuredTimeout > Duration.zero
+        ? configuredTimeout
+        : DatadogFlagsConfiguration.defaultAssignmentRequestTimeout;
+    final configuredRetryCount = configuration.assignmentRequestRetryCount;
+    final retryCount = configuredRetryCount >= 0 ? configuredRetryCount : 0;
+
+    for (var attempt = 0; attempt <= retryCount; attempt++) {
+      try {
+        final response = await httpClient
+            .post(endpoint, headers: _headers(), body: body)
+            .timeout(timeout);
+        if (!_isRetryableStatus(response.statusCode) || attempt == retryCount) {
+          return response;
+        }
+      } catch (error) {
+        final canRetry =
+            error is TimeoutException || error is http.ClientException;
+        if (!canRetry || attempt == retryCount) {
+          throw FlagsException.networkError(
+            'Failed to fetch flag assignments.',
+            cause: error,
+          );
+        }
+      }
+    }
+
+    throw StateError('Assignment request retry loop completed unexpectedly.');
+  }
+}
+
+bool _isRetryableStatus(int statusCode) {
+  return statusCode == 408 ||
+      statusCode == 429 ||
+      (statusCode >= 500 && statusCode <= 599);
 }
 
 Map<String, Object?> _asObject(Object? value, String name) {

@@ -3,6 +3,7 @@
 // developed at Datadog (https://www.datadoghq.com/).
 // Copyright 2019-Present Datadog, Inc.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:datadog_flags/datadog_flags.dart';
@@ -377,6 +378,99 @@ void main() {
         );
       },
     );
+
+    test('retries a transient assignment request once by default', () async {
+      var attemptCount = 0;
+      final fetcher = FlagAssignmentsFetcher(
+        datadogConfig: _contextFor(DatadogFlagsSite.us1),
+        configuration: const DatadogFlagsConfiguration(),
+        httpClient: MockClient((_) async {
+          attemptCount++;
+          if (attemptCount == 1) {
+            throw TimeoutException('timed out');
+          }
+          return http.Response(jsonEncode({'data': _emptyAssignments()}), 200);
+        }),
+      );
+
+      await fetcher.fetch(
+        const FlagsEvaluationContext(targetingKey: 'subject'),
+      );
+
+      expect(attemptCount, 2);
+    });
+
+    test('uses the configured assignment request retry count', () async {
+      var attemptCount = 0;
+      final fetcher = FlagAssignmentsFetcher(
+        datadogConfig: _contextFor(DatadogFlagsSite.us1),
+        configuration: const DatadogFlagsConfiguration(
+          assignmentRequestTimeout: Duration(seconds: 2),
+          assignmentRequestRetryCount: 2,
+        ),
+        httpClient: MockClient((_) async {
+          attemptCount++;
+          if (attemptCount < 3) {
+            return http.Response('retry', 500);
+          }
+          return http.Response(jsonEncode({'data': _emptyAssignments()}), 200);
+        }),
+      );
+
+      await fetcher.fetch(
+        const FlagsEvaluationContext(targetingKey: 'subject'),
+      );
+
+      expect(attemptCount, 3);
+      expect(fetcher.configuration.assignmentRequestTimeout,
+          const Duration(seconds: 2));
+    });
+
+    test('applies the configured timeout to the complete request', () async {
+      final fetcher = FlagAssignmentsFetcher(
+        datadogConfig: _contextFor(DatadogFlagsSite.us1),
+        configuration: const DatadogFlagsConfiguration(
+          assignmentRequestTimeout: Duration(milliseconds: 1),
+          assignmentRequestRetryCount: 0,
+        ),
+        httpClient: MockClient((_) => Completer<http.Response>().future),
+      );
+
+      await expectLater(
+        fetcher.fetch(
+          const FlagsEvaluationContext(targetingKey: 'subject'),
+        ),
+        throwsA(
+          isA<FlagsException>().having(
+            (error) => error.cause,
+            'cause',
+            isA<TimeoutException>(),
+          ),
+        ),
+      );
+    });
+
+    test('does not retry a non-transient assignment response', () async {
+      var attemptCount = 0;
+      final fetcher = FlagAssignmentsFetcher(
+        datadogConfig: _contextFor(DatadogFlagsSite.us1),
+        configuration: const DatadogFlagsConfiguration(
+          assignmentRequestRetryCount: 3,
+        ),
+        httpClient: MockClient((_) async {
+          attemptCount++;
+          return http.Response('bad request', 400);
+        }),
+      );
+
+      await expectLater(
+        fetcher.fetch(
+          const FlagsEvaluationContext(targetingKey: 'subject'),
+        ),
+        throwsA(isA<FlagsException>()),
+      );
+      expect(attemptCount, 1);
+    });
 
     test('reports invalid response errors for malformed envelopes', () async {
       final fetcher = FlagAssignmentsFetcher(

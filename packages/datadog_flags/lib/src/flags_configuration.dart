@@ -21,11 +21,27 @@ final class DatadogFlagsConfiguration {
   /// Largest supported flag evaluation telemetry flush interval.
   static const maxEvaluationFlushInterval = Duration(seconds: 60);
 
+  /// Default timeout for each precomputed assignment request.
+  static const defaultAssignmentRequestTimeout = Duration(seconds: 1);
+
+  /// Default number of retries after the first assignment request attempt.
+  static const defaultAssignmentRequestRetryCount = 1;
+
   /// Overrides the precompute assignments endpoint.
   final Uri? customFlagsEndpoint;
 
   /// Additional headers sent with precompute assignment requests.
   final Map<String, String>? customFlagsHeaders;
+
+  /// Timeout for each precomputed assignment request.
+  ///
+  /// Values less than or equal to zero use [defaultAssignmentRequestTimeout].
+  final Duration assignmentRequestTimeout;
+
+  /// Number of retries after a transient assignment request failure.
+  ///
+  /// Negative values are treated as zero.
+  final int assignmentRequestRetryCount;
 
   /// Overrides the exposure intake endpoint.
   final Uri? customExposureEndpoint;
@@ -59,6 +75,8 @@ final class DatadogFlagsConfiguration {
   const DatadogFlagsConfiguration({
     this.customFlagsEndpoint,
     this.customFlagsHeaders,
+    this.assignmentRequestTimeout = defaultAssignmentRequestTimeout,
+    this.assignmentRequestRetryCount = defaultAssignmentRequestRetryCount,
     this.customExposureEndpoint,
     this.trackExposures = true,
     this.customEvaluationEndpoint,
